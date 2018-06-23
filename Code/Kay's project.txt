@@ -1,0 +1,425 @@
+
+
+
+/********************************************************************************************************************/
+/**************************Step one, input economic risk factor data for modeling************************************/
+/********************************************************************************************************************/
+
+/************************Input GDP for 4 states***********************************/
+
+Proc sql;
+  create table data.GDP_4_state as 
+  	select	a.*,
+			b.*
+	from	gdp_before1997 as a
+	left join gdp_after1997 as b
+		on a.area = b.area
+	where a.area in ('New York','California','North Carolina','Illinois')
+	;
+quit;
+
+Proc transpose data=data.GDP_4_STATE out=check_result;
+run;
+
+Proc sql;
+  create table data.GDP_for_year as 
+  	select	_Name_ as year,
+			Col1 as GDP,
+			'CA' as state
+	from	check_result
+	UNION all
+	select	_Name_ as year,
+			Col2 as GDP,
+			'IL' as state
+	from	check_result
+	UNION all
+	select	_Name_ as year,
+			Col3 as GDP,
+			'NY' as state
+	from	check_result
+	UNION all
+	select	_Name_ as year,
+			Col4 as GDP,
+			'NC' as state
+	from	check_result
+	;
+quit;
+
+/********************Input 30 years fixed mortgage rate*********************/
+
+Proc sql;
+  create table year_mortgage as 
+  	select	*,
+			year(date) as year
+	from MORTGAGE30US
+	;
+quit;
+
+Proc sql;
+  create table data.Mortgage_rate_for_year as 
+  	select	year,
+			median(Mortgage30US) as year_rate
+	from  year_mortgage
+	group by year
+	;
+quit;
+
+/**********************Input CPI for 4 States*******************************/
+
+Proc sql;
+  create table data.CPI_for_year as 
+  	select	year,
+			annual as CPI,
+			'CA' as state
+	from	CA_CPI
+	union all
+	select	year,
+			annual as CPI,
+			'NC' as state
+	from	NC_CPI
+	union all
+	select	year,
+			annual as CPI,
+			'NY' as state
+	from	NY_CPI
+	union all
+	select	year,
+			annual as CPI,
+			'IL' as state
+	from	IL_CPI
+	;
+quit;
+
+/*******************Input unemployment rate for 4 states****************************/
+
+Proc sql;
+  create table data.Unemp_4_states as 
+  	select	*,
+			'CA' as State
+	from CA_UNEMP
+	Union all
+	select	*,
+			'IL' as State
+	from IL_UNEMP
+	Union all
+	select	*,
+			'NC' as State
+	from NC_UNEMP
+	Union all
+	select	*,
+			'NY' as State
+	from NY_UNEMP
+	;
+quit;
+
+Proc sql;
+  create table data.Unemp_for_year as 
+  	select	year,
+			median(Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec) as Unemp_rate,
+			state
+	from	data.Unemp_4_states
+	;
+quit;
+
+/**************Input Inflation national*********/
+
+Proc sql;
+  create table data.Inflation_for_year as 
+  	select	year,
+			median(Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec) as Inflation
+	from Inflation
+	;
+quit;
+
+/**********************Input CPI for 4 States*******************************/
+
+Proc sql;
+  create table data.HPI_6_state as 
+  	select	*,
+			year(date) as year,
+			'CA' as state
+	from	CASTHPI
+	union all
+	select	*,
+			year(date) as year,
+			'KY' as state
+	from	KYSTHPI
+	union all
+	select	*,
+			year(date) as year,
+			'NC' as state
+	from	NCSTHPI
+	union all
+	select	*,
+			year(date) as year,
+			'NY' as state
+	from	NYSTHPI
+	union all
+	select	*,
+			year(date) as year,
+			'OH' as state
+	from	OHSTHPI
+	union all
+	select	*,
+			year(date) as year,
+			'WA' as state
+	from	WASTHPI
+	;
+quit;
+
+Proc sql;
+  create table data.HPI_for_year as 
+  	select	year,
+			case when state eq 'OH' then 'IL' else state end as State,
+			Median(CASTHPI) as HPI
+	from	data.HPI_6_state
+	group by year,state
+	order by state,year
+	;
+quit;
+
+/***************input house hold income************************/
+
+Proc sql;
+  create table data.HHI_4_state as 
+  	select	*
+	from	household_income_state_1984
+	where State in ('New York','California','North Carolina','Illinois')
+	;
+quit;
+
+Proc transpose data=data.HHI_4_state out=HHI_result;
+run;
+
+Proc sql;
+  create table data.HHI_for_year as 
+  	select	_Name_ as year,
+			Col1 as HHI,
+			'CA' as state
+	from	HHI_result
+	UNION all
+	select	_Name_ as year,
+			Col2 as HHI,
+			'IL' as state
+	from	HHI_result
+	UNION all
+	select	_Name_ as year,
+			Col3 as HHI,
+			'NY' as state
+	from	HHI_result
+	UNION all
+	select	_Name_ as year,
+			Col4 as HHI,
+			'NC' as state
+	from	HHI_result
+	Order by state,year 
+	;
+quit;
+
+/**********************Input House price ************************************/
+Proc sql;
+  create table data.HP_for_year as 
+  	select	year,
+			west_m as HP,
+			'CA' as state
+	from	SoldHousePrice
+	union all
+	select	year,
+			Midwest_m as HP,
+			'IL' as state
+	from	SoldHousePrice
+	union all
+	select	year,
+			Northeast_m as HP,
+			'NY' as state
+	from	SoldHousePrice
+	union all
+	select	year,
+			south_m as HP,
+			'NC' as state
+	from	SoldHousePrice
+	;
+quit;
+	
+/********************************************************************************************************************/
+/**************************Step two, build model to divide economic level of state***********************************/
+/********************************************************************************************************************/
+
+/*********************************Get economic factor**********************************/
+Data GDP_change_rate;
+	set data.GDP_FOR_YEAR;
+	Change_rate = GDP/lag(GDP);
+run;
+
+Proc sql;
+  create table GDP_change_rate_inf as 
+  	select	a.*,
+			b.change_rate,
+			b.state,
+			Case when (b.change_rate-1)*100 > a.Inflation then 1 else 0 end as Economic_flag
+	from data.inflation_for_year as a
+	inner join GDP_change_rate as b
+		on put(a.year,4.) = b.year
+	order by state,a.year
+	;
+quit;
+
+/******************logistic model 1: Basic one**************************************/
+Proc sql;
+  create table economic_table_1 as 
+  	select	a.year,
+			a.state,
+			a.economic_flag,
+			CPI,
+			HPI,
+			d.Unemp_rate,
+			e.year_rate as mortgage_rate
+	from GDP_change_rate_inf as a
+	left join data.CPI_for_year as b
+		on a.year = b.year
+		and a.state = b.state
+	left join data.HPI_for_year as c
+		on a.year = c.year
+		and a.state = c.state
+	left join data.Unemp_for_year as d
+		on a.year = d.year
+		and a.state = d.state
+	left join data.Mortgage_rate_for_year as e
+		on a.year = e.year
+	where a.year >= 1976
+	;
+quit;
+
+Proc logistic data=economic_table_1;
+	model Economic_flag = CPI HPI Unemp_rate mortgage_rate;
+run;
+
+/*********************transfer HPI and CPI with log10**************/
+Proc sql;
+  create table economic_table_2 as 
+  	select	a.year,
+			a.state,
+			a.economic_flag,
+			log10(b.CPI) as CPI,
+			log10(c.HPI) as HPI,
+			d.Unemp_rate,
+			e.year_rate as mortgage_rate
+	from GDP_change_rate_inf as a
+	left join data.CPI_for_year as b
+		on a.year = b.year
+		and a.state = b.state
+	left join data.HPI_for_year as c
+		on a.year = c.year
+		and a.state = c.state
+	left join data.Unemp_for_year as d
+		on a.year = d.year
+		and a.state = d.state
+	left join data.Mortgage_rate_for_year as e
+		on a.year = e.year
+	where a.year >= 1976
+	;
+quit;
+
+Proc logistic data=economic_table_2;
+	model Economic_flag = CPI HPI Unemp_rate mortgage_rate;
+run;
+
+/*******************ONLY remove CPI for model*********************************/
+
+Proc logistic data=economic_table_2;
+	model Economic_flag = HPI Unemp_rate mortgage_rate;
+run;
+
+/*******************ONLY remove HPI for model*********************************/
+Proc logistic data=economic_table_2;
+	model Economic_flag = CPI Unemp_rate mortgage_rate;
+run;
+
+
+/****************plot for influence*******************************/
+
+ods graphics on;
+Proc logistic data=economic_table_2;
+	model Economic_flag = HPI Unemp_rate mortgage_rate/influence iplots;
+run;
+ods graphics off;
+
+/********************************************************************************************************************/
+/*******Step three, build liner regression model to build the relationship of hose price and house hold income*******/
+/********************************************************************************************************************/
+
+/************get table together with HP, HHP, GDP, HPI, Unemployment rate, Mortgage rate*************************/
+
+Proc sql;
+  create table Price_model_table as 
+  	select	a.year,
+			a.state,
+			log10(a.HP) as HP,
+			log10(b.HHI) as HHI,
+			log10(c.GDP) as GDP,
+			log10(d.HPI) as HPI,
+			e.Unemp_rate/100 as Unemp_rate,
+			f.year_rate/100 as Mortgage_rate
+	from data.HP_for_year as a
+	left join data.HHI_for_year as b
+		on a.year = input(b.year,4.)
+		and a.state = b.state
+	left join data.GDP_for_year as c
+		on a.year = input(c.year,4.)
+		and a.state = c.state
+	left join data.HPI_for_year as d
+		on a.year = d.year
+		and a.state = d.state
+	left join data.Unemp_for_year as e
+		on a.year = e.year
+		and a.state = e.state
+	left join data.mortgage_rate_for_year as f
+		on a.year = f.year
+	where a.year >= 1984
+	order by a.year,a.state
+	;
+quit;
+
+Proc sql;
+  create table CA_model as 
+ 	select	*
+	from Price_model_table
+	where state = 'CA'
+	;
+  create table IL_model as 
+ 	select	*
+	from Price_model_table
+	where state = 'IL'
+	;
+  create table NY_model as 
+ 	select	*
+	from Price_model_table
+	where state = 'NY'
+	;
+  create table NC_model as 
+ 	select	*
+	from Price_model_table
+	where state = 'NC'
+	;
+quit;
+
+ods graphics on;
+   
+proc reg data=IL_model;
+	model HP=HHI HPI Mortgage_rate;
+run;
+   
+ods graphics off;
+
+ods graphics on;
+   
+proc reg data=CA_model;
+	model HP=HHI HPI Mortgage_rate;
+run;
+   
+ods graphics off;
+
+Proc glm data=Price_model_table;
+	class state;
+  model HP =HPI HHI Mortgage_rate Unemp_rate state;
+run;
